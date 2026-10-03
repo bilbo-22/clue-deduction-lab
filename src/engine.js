@@ -8,7 +8,7 @@ const CAT_RANGE = [[0, 6], [6, 12], [12, 21]];
 const CAT_NAME = ['Suspect', 'Weapon', 'Room'];
 const N = 21, NP = 4, ENV = 4, NL = 5;
 const UNK = 0, YES = 1, NO = 2;
-const LEVELS = ['Basic', 'Counting', 'Clauses', 'Perfect'];
+const LEVELS = ['Basic', 'Counting', 'Clauses', 'Perfect', 'Smart'];
 const LOC_NAME = l => (l === ENV ? 'Envelope' : 'P' + (l + 1));
 
 function rngFrom(seed) {
@@ -67,9 +67,9 @@ class Know {
     this.set(card, p, YES, 'shown', `P${p + 1} showed me this on turn ${t}`);
     this.propagate();
   }
-  observeClause(p, cards, t) {
+  observeClause(p, cards, t, why) {
     this.turn = t;
-    if (this.level >= 2) this.clauses.push({ id: t, p, cards: [...cards], done: false, note: '' });
+    if (this.level >= 2) this.clauses.push({ id: t, p, cards: [...cards], done: false, note: '', why: why || 'showed a card' });
     this.propagate();
   }
 
@@ -141,7 +141,7 @@ class Know {
       const open = cl.cards.filter(c => this.get(c, cl.p) !== NO);
       if (open.length === 0) { this.contra = true; return false; }
       if (open.length === 1) {
-        changed = this.set(open[0], cl.p, YES, 'clause', `Clue #${cl.id}: P${cl.p + 1} showed a card and the other two are ruled out`) || changed;
+        changed = this.set(open[0], cl.p, YES, 'clause', `Clue #${cl.id}: P${cl.p + 1} ${cl.why} and the other two are ruled out`) || changed;
         cl.done = true; cl.note = `resolved to ${CARDS[open[0]]}`;
       }
     }
@@ -197,7 +197,7 @@ class Know {
   }
   // Backtracking search for one full deal consistent with the notebook.
   // Returns the owner array, null if none exists, or false if the node budget ran out.
-  search(forceC, forceL) {
+  search(forceC, forceL, rng) {
     const dom = [];
     const owner = new Int8Array(N).fill(-1);
     const cnt = new Int8Array(NL);
@@ -207,6 +207,7 @@ class Know {
       let d = [];
       for (let l = 0; l < NL; l++) if (this.get(c, l) !== NO) d.push(l);
       if (c === forceC) d = d.includes(forceL) ? [forceL] : [];
+      if (rng) shuffle(d, rng);
       if (!d.length) return null;
       dom[c] = d;
       if (d.length === 1) {
@@ -217,10 +218,11 @@ class Know {
     }
     for (let l = 0; l < NL; l++) if (cnt[l] > this.sizes[l]) return null;
     if (envCat.some(x => x > 1)) return null;
+    if (rng) shuffle(order, rng);
     order.sort((x, y) => dom[x].length - dom[y].length);
     const clauses = this.clauses.filter(cl => !cl.done);
     const sizes = this.sizes;
-    let budget = 60000;
+    let budget = Know.budget;
     const feasible = from => {
       for (let l = 0; l < NL; l++) {
         const need = sizes[l] - cnt[l];
@@ -289,8 +291,90 @@ class Know {
   }
 }
 
+// Work cap per search. At 5 million steps no search in 300 test games ran out, so the notebook is complete in practice.
+Know.budget = 5e6;
+
 // Pick a suggestion: in each unsolved category ask about the least-known envelope candidate;
 // in a solved category, use a card I hold (or the answer) so it reveals nothing about that category.
+// Smart questions: sample deals consistent with my notebook, then ask the suggestion whose
+// answer (who shows, and which card) is least predictable, i.e. carries the most information.
+function chooseSmart(K, rng, leak = 0, hints = null, nSamples = 40, envGoal = false) {
+  const samples = [];
+  for (let i = 0; i < nSamples; i++) { const s = K.search(-1, -1, rng); if (s) samples.push(s); }
+  // Reader: a deal where an opponent holds a card they asked about is less likely (people rarely ask about their own cards).
+  const wt = samples.map(own => {
+    let x = 1;
+    if (hints) for (const h of hints) for (const c of h.cards) if (own[c] === h.p) x *= 0.3;
+    return x;
+  });
+  const tot = wt.reduce((a, b) => a + b, 0);
+  if (samples.length < 2) return chooseSuggestion(K, rng);
+  const pools = CAT_RANGE.map(([a, b]) => {
+    const p = [];
+    for (let c = a; c < b; c++) if (K.get(c, ENV) !== NO || K.get(c, K.me) === YES) p.push(c);
+    return p;
+  });
+  let best = -Infinity, ties = [];
+  for (const s of pools[0]) for (const w of pools[1]) for (const r of pools[2]) {
+    const counts = new Map(), pub = new Map(), envBy = envGoal ? new Map() : null;
+    for (let j = 0; j < samples.length; j++) {
+      const own = samples[j];
+      let key = -1, who = -1;
+      for (let i = 1; i < NP && key < 0; i++) {
+        const q = (K.me + i) % NP;
+        const has = [s, w, r].filter(c => own[c] === q);
+        if (has.length) { who = q; key = q * 32 + has[Math.floor(rng() * has.length)]; }
+      }
+      counts.set(key, (counts.get(key) || 0) + wt[j]);
+      if (envBy) {
+        const ek = own.reduce((a, l, c) => (l === ENV ? a * 32 + c : a), 0);
+        if (!envBy.has(key)) envBy.set(key, new Map());
+        const m = envBy.get(key); m.set(ek, (m.get(ek) || 0) + wt[j]);
+      }
+      pub.set(who, (pub.get(who) || 0) + wt[j]);
+    }
+    // What I learn (who answers + which card) minus `leak` times what everyone else learns (who answers).
+    let h = 0;
+    if (envBy) {
+      // Envelope goal: expected drop in uncertainty about the three envelope cards only.
+      for (const [key, m] of envBy) {
+        const nk = counts.get(key);
+        let hk = 0;
+        for (const v of m.values()) { const f = v / nk; hk -= f * Math.log2(f); }
+        h -= (nk / tot) * hk;
+      }
+    } else for (const n of counts.values()) { const f = n / tot; h -= f * Math.log2(f); }
+    for (const n of pub.values()) { const f = n / tot; h += leak * f * Math.log2(f); }
+    if (h > best + 1e-9) { best = h; ties = [[s, w, r]]; } else if (h > best - 1e-9) ties.push([s, w, r]);
+  }
+  return ties[Math.floor(rng() * ties.length)];
+}
+
+// Focus (a human-friendly rule): ask about one unknown card and fill the other two
+// slots with cards from my hand, so whoever answers must show exactly that card.
+function chooseFocus(K, rng, hidden) {
+  const base = chooseSuggestion(K, rng);
+  const open = [0, 1, 2].filter(k => K.get(base[k], ENV) !== YES && K.get(base[k], K.me) !== YES);
+  if (open.length <= 1) return base;
+  const keep = open[Math.floor(rng() * open.length)];
+  return base.map((c, k) => {
+    if (k === keep || !open.includes(k)) return c;
+    const mine = [];
+    for (let x = CAT_RANGE[k][0]; x < CAT_RANGE[k][1]; x++) if (K.get(x, K.me) === YES && (!hidden || !hidden.has(x))) mine.push(x);
+    return mine.length ? mine[Math.floor(rng() * mine.length)] : c;
+  });
+}
+
+// Bluffer: a standard asker who, with probability `rate`, swaps one card for one of their own.
+function chooseBluff(K, rng, rate) {
+  const sug = chooseSuggestion(K, rng);
+  if (rng() >= rate) return sug;
+  const k = Math.floor(rng() * 3), mine = [];
+  for (let x = CAT_RANGE[k][0]; x < CAT_RANGE[k][1]; x++) if (K.get(x, K.me) === YES) mine.push(x);
+  if (mine.length) sug[k] = mine[Math.floor(rng() * mine.length)];
+  return sug;
+}
+
 function chooseSuggestion(K, rng) {
   return CAT_RANGE.map(([a, b]) => {
     let solved = -1;
@@ -316,12 +400,12 @@ function newGame(seed, levels, opts = {}) {
   const env = CAT_RANGE.map(([a, b]) => a + Math.floor(rng() * (b - a)));
   const rest = shuffle(CARDS.map((_, i) => i).filter(i => !env.includes(i)), rng);
   const hands = [[], [], [], []];
-  rest.forEach((c, i) => hands[i % NP].push(c));
+  rest.forEach((c, i) => hands[(i + (opts.dealStart || 0)) % NP].push(c));
   hands.forEach(h => h.sort((x, y) => x - y));
   const sizes = hands.map(h => h.length);
   const knows = hands.map((h, p) => { const K = new Know(p, sizes, levels[p]); K.initHand(h); return K; });
   if (opts.full) knows.forEach(K => K.deepen());
-  const game = { seed, rng, env, hands, sizes, knows, levels, turn: 0, over: false, winner: -1, wrong: 0, events: [], shownTo: hands.map(() => new Map()), full: !!opts.full, snaps: [] };
+  const game = { nowin: opts.nowin !== false, ask: opts.ask || null, seed, rng, env, hands, sizes, knows, levels, turn: 0, over: false, winner: -1, wrong: 0, events: [], shownTo: hands.map(() => new Map()), full: !!opts.full, snaps: [] };
   if (opts.full) game.snaps.push(knows.map(K => K.snapshot()));
   return game;
 }
@@ -331,6 +415,10 @@ function accuse(game, p, sol, ev) {
   const right = sol.every((c, i) => c === game.env[i]);
   ev.correct = right;
   if (right) { game.over = true; game.winner = p; } else game.wrong++;
+}
+
+function hintsFor(game, p) {
+  return game.events.filter(e => e.suggestion && e.player !== p).map(e => ({ p: e.player, cards: e.suggestion }));
 }
 
 function playTurn(game) {
@@ -344,7 +432,17 @@ function playTurn(game) {
   if (sol) {
     accuse(game, p, sol, ev);
   } else {
-    const sug = chooseSuggestion(K, game.rng);
+    const mode = game.ask ? game.ask[p] : (K.level >= 4 ? 'reader' : 'basic');
+    const sug = mode === 'smart' ? chooseSmart(K, game.rng)
+      : mode === 'stealth' ? chooseSmart(K, game.rng, 1)
+      : mode === 'reader120' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120)
+      : mode === 'envgoal' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120, true)
+      : mode === 'reader' ? chooseSmart(K, game.rng, 0, game.events.filter(e => e.suggestion && e.player !== p).map(e => ({ p: e.player, cards: e.suggestion })))
+      : mode.startsWith('bluff') ? chooseBluff(K, game.rng, +mode.slice(5) / 100)
+      : mode === 'half' ? chooseSmart(K, game.rng, 0.5)
+      : mode === 'focus' ? chooseFocus(K, game.rng)
+      : mode === 'cover' ? chooseFocus(K, game.rng, new Set([...game.shownTo[p].values()].flatMap(x => [...x])))
+      : chooseSuggestion(K, game.rng);
     ev.suggestion = sug;
     for (let i = 1; i < NP; i++) {
       const r = (p + i) % NP;
@@ -368,6 +466,11 @@ function playTurn(game) {
     K.deepen();
     sol = K.solution();
     if (sol) accuse(game, p, sol, ev);
+    else if (ev.responder < 0 && game.nowin) {
+      // Nobody could answer, yet the asker did not accuse. Had they held none of the three,
+      // all three would be in the envelope and they would have won, so they hold at least one.
+      game.knows.forEach(k => { if (k.me !== p) k.observeClause(p, sug, t, 'stayed silent after nobody answered'); });
+    }
   }
   if (game.full) {
     game.knows.forEach(k => k.deepen());

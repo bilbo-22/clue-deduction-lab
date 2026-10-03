@@ -222,9 +222,11 @@ table.cmp tr.hl td { background: var(--accent-soft); }
       <div class="tablewrap"><table class="cmp" id="cmpSame"></table></div>
     </div>
     <div class="panel">
-      <h3>One perfect detective among basic note-takers</h3>
-      <p class="note">Same 1,000 deals. Each row moves the one Perfect player to a different seat; the other three play Basic. ★ marks the Perfect player's own win rate. Fair share is 25%.</p>
-      <div class="tablewrap"><table class="cmp" id="cmpMixed"></table></div>
+      <h3>Smart questions vs standard questions</h3>
+      <p class="note">Same 1,000 deals. Every notebook is Perfect; only the way of choosing questions changes.</p>
+      <div class="tablewrap"><table class="cmp" id="cmpSmartAll"></table></div>
+      <p class="note">One Smart player, three standard players. Each row moves the Smart player to a different seat. ★ marks the Smart player's own win rate. Fair share is 25%.</p>
+      <div class="tablewrap"><table class="cmp" id="cmpSmartSeat"></table></div>
     </div>
   </section>
 
@@ -237,7 +239,8 @@ table.cmp tr.hl td { background: var(--accent-soft); }
         <li><b>Pure deduction, no board.</b> Every turn a player may suggest any suspect, weapon and room. Dice and walking to rooms are left out, so the turn counts here are the logical minimum for this strategy. A real board game takes longer.</li>
         <li>After a suggestion, players to the left answer in order. The first one holding any of the three cards shows exactly one, privately. If they hold several, they show a card they already showed that same player when possible, so they leak less.</li>
         <li>A player accuses only when their notebook proves all three envelope cards. They may accuse at the start of their turn or right after their own suggestion. A correct accusation ends the game.</li>
-        <li>Suggestion strategy: in each category still unsolved, name the envelope candidate the notebook knows least about. In a solved category, name a card from your own hand (or the solved card) so that slot cannot draw a response and the answer must come from the other two.</li>
+        <li><b>Standard questions:</b> in each category still unsolved, name the envelope candidate the notebook knows least about. In a solved category, name a card from your own hand (or the solved card) so that slot cannot draw a response and the answer must come from the other two.</li>
+        <li><b>Smart questions:</b> the player builds 40 complete deals that fit everything in their notebook. For each of the 324 possible suggestions, it checks what would happen in each deal: who shows a card, and which one. It asks the suggestion whose answer is hardest to predict, because that answer rules out the most deals. It also reads opponents' suggestions: people rarely name cards from their own hand, so a deal where an opponent holds a card they asked about counts for less. This reading only steers which question to ask. It never puts a mark in the notebook.</li>
       </ul>
     </section>
     <section>
@@ -261,6 +264,7 @@ table.cmp tr.hl td { background: var(--accent-soft); }
           <br><b>Clues fill the hand.</b> If P4 holds 4 cards, 2 are known, and two open clues share no cards, those clues must use up the last 2 slots. Every other unknown in P4's column is ✗.</li>
         <li><span class="lvl">PERFECT</span> <b>Exhaustive search.</b> The notebook tries to build complete deals that agree with everything observed. If no consistent deal puts a card in some place, that cell is ✗. If every consistent deal puts it in the same place, that cell is ✓. This finds every fact that logically follows, including chains no simple rule names.</li>
       </ol>
+      <p class="muted"><span class="lvl">SMART</span> uses the Perfect notebook and changes only how questions are chosen (see The setup).</p>
       <div class="ex">The searches are capped at a fixed amount of work per cell. A cell the search cannot settle in time stays blank, so a Perfect notebook never claims more than it can prove.</div>
     </section>
     <section>
@@ -305,10 +309,12 @@ function stats(t, w) {
     <div class="stat"><span class="eyebrow">Rounds of 4 turns</span><span class="v">${st.rounds.toFixed(1)}</span></div>
     <div class="stat"><span class="eyebrow">Median turn</span><span class="v">${st.median}</span></div>
     <div class="stat"><span class="eyebrow">80% of games end</span><span class="v">turn ${st.p10}–${st.p90}</span></div>
-    <div class="stat"><span class="eyebrow">Basic notes instead</span><span class="v">${b.mean.toFixed(1)} turns</span></div>`;
+    <div class="stat"><span class="eyebrow">Basic notes instead</span><span class="v">${b.mean.toFixed(1)} turns</span></div>
+    <div class="stat"><span class="eyebrow">One smart asker wins</span><span class="v">${(PRE.smartSeat.reduce((a, r, i) => a + stats(r.t, r.w).wins[i], 0) / 40).toFixed(1)}%</span></div>`;
   const c = stats(PRE.same[2].t, PRE.same[2].w), k = stats(PRE.same[1].t, PRE.same[1].w);
-  const mx = PRE.mixed.map((r, i) => stats(r.t, r.w).wins[i] / 10);
-  $('findings').innerHTML = `With all four players at Basic, games end on turn ${b.mean.toFixed(1)} on average. Hand-size counting brings that to ${k.mean.toFixed(1)}. Tracking numbered clues is the big step: ${c.mean.toFixed(1)}. Full exhaustive search adds only a little more (${st.mean.toFixed(1)}), because the clue rules already catch nearly everything. Notation is a real edge: a single Perfect player among Basic players wins ${Math.round(Math.min(...mx))}–${Math.round(Math.max(...mx))}% of games depending on seat, against a fair share of 25%.`;
+  const sa = stats(PRE.smartAll.t, PRE.smartAll.w);
+  const sw = PRE.smartSeat.reduce((a, r, i) => a + stats(r.t, r.w).wins[i] / 10, 0) / 4;
+  $('findings').innerHTML = `With all four players at Basic, games end on turn ${b.mean.toFixed(1)} on average. Hand-size counting brings that to ${k.mean.toFixed(1)}. Tracking numbered clues is the big step: ${c.mean.toFixed(1)}. Full exhaustive search adds only a little more (${st.mean.toFixed(1)}), because the clue rules already catch nearly everything. Questions matter as much as notes: when everyone asks smart questions, games end on turn ${sa.mean.toFixed(1)}, and a single smart asker among standard askers wins ${sw.toFixed(1)}% of games on average across the four seats, against a fair share of 25%.`;
 })();
 
 // ----- Tabs -----
@@ -509,7 +515,8 @@ function cmpTable(el, runs, label, hlIndex, diag) {
     runs.map((r, i) => { const st = stats(r.t, r.w); return `<tr class="${i === hlIndex ? 'hl' : ''}"><td>${r.label}</td><td class="mono">${st.mean.toFixed(2)}</td><td class="mono">${st.rounds.toFixed(2)}</td><td class="mono">${st.median}</td><td class="mono">${st.p10}–${st.p90}</td>${st.wins.map((x, p) => `<td class="mono"${diag && p === i ? ' style="color:var(--accent);font-weight:600"' : ''}>${(x / st.n * 100).toFixed(1)}%${diag && p === i ? ' ★' : ''}</td>`).join('')}</tr>`; }).join('') + '</tbody>';
 }
 cmpTable($('cmpSame'), PRE.same.map((r, i) => ({ ...r, label: `All ${LEVELS[i]}` })), 'Every seat plays', 3);
-cmpTable($('cmpMixed'), PRE.mixed.map((r, i) => ({ ...r, label: `P${i + 1} Perfect` })), 'Table', -1, true);
+cmpTable($('cmpSmartAll'), [{ ...PRE.same[3], label: 'Standard questions' }, { ...PRE.smartAll, label: 'Smart questions' }], 'Every seat asks', 1);
+cmpTable($('cmpSmartSeat'), PRE.smartSeat.map((r, i) => ({ ...r, label: `P${i + 1} Smart` })), 'Table', -1, true);
 
 $('runLab').addEventListener('click', () => {
   if (worker) { worker.terminate(); worker = null; $('runLab').textContent = 'Run'; $('progLabel').textContent = 'stopped'; return; }

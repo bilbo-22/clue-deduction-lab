@@ -24,6 +24,9 @@ function summary(r) {
 const out = {
   same: [0, 1, 2, 3].map(l => run([l, l, l, l])),
   mixed: [0, 1, 2, 3].map(seat => run([0, 1, 2, 3].map(p => (p === seat ? 3 : 0)))),
+  // Smart questions vs standard questions; every notebook is Perfect.
+  smartAll: run([4, 4, 4, 4]),
+  smartSeat: [0, 1, 2, 3].map(seat => run([0, 1, 2, 3].map(p => (p === seat ? 4 : 3)))),
 };
 fs.writeFileSync('results/results.json', JSON.stringify(out));
-[...out.same, ...out.mixed].forEach(r => console.log(summary(r)));
+[...out.same, ...out.mixed, out.smartAll, ...out.smartSeat].forEach(r => console.log(summary(r)));
