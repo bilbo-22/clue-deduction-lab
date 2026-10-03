@@ -70,3 +70,14 @@ The Most-X choice includes Smart's question in 47% of decisions and captures abo
 - **Smart was right because of clues.** Deal 173, turn 15: every candidate had at most one X, so X-counting could not separate them. Smart named the Wrench, which had no X's but a 60% chance of being in the envelope once the open clues are taken into account. About 12.4 answers left vs 14.6 for the Most-X pick.
 
 **More imagined deals did not help in actual games.** One Smart player using 400 deals per decision against three Smart players using 120 won 24.8% (300 deals, fair share 25%). The occasional mis-pick from sampling noise costs too little to change who wins.
+
+## Your questions give you away
+
+A Most-X player almost always names cards they do not hold, so their questions leak their hand. Smart players read that: a deal where a player holds a card they asked about counts for less (weight 0.3). Turning that reading off shows what it is worth (300 deals, fair share 25%):
+
+| One Most-X player against | Win rate |
+|---|---|
+| 3 Smart players who read questions | 23.4% |
+| 3 Smart players who ignore questions | 40.1% |
+
+Reading questions is worth about 17 points here, and without it Smart loses to the simple rule. Part of that gap is reading every opponent's questions, not just the Most-X player's, so it measures the value of reading in general rather than the leak alone.
