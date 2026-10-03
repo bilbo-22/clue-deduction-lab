@@ -24,15 +24,16 @@ With four perfect logicians, a game is solved on **turn 21.5 on average** (a tur
 
 Every notebook below is Perfect; only the way of choosing a suggestion changes.
 
-| 1,000 deals | Standard | Smart | Envelope Smart (experimental) |
+| 1,000 deals | Standard | Smart v1 | **Smart** (on the page) |
 |---|---|---|---|
-| Whole table, mean turn the game ends | 21.46 | 16.46 | 11.49 |
-| Whole table, 95% solved by | 26 | 21 | 17 |
-| One player using it, average win rate across seats | 25% vs 3 Standard | 40.9% vs 3 Standard | 52.7% vs 3 Smart |
+| Whole table, mean turn the game ends | 21.46 | 16.46 | **11.49** |
+| Whole table, 95% solved by | 26 | 21 | **17** |
+| One player using it vs 3 Standard, average win rate across seats | 25% | 40.9% | **59.4%** |
+| One player using it vs 3 Smart v1 | | 25% | **52.7%** |
 
 - **Standard:** in each unsolved category, name the envelope candidate the notebook knows least about.
-- **Smart:** build 40 complete deals consistent with the notebook, try all 324 suggestions in each, and ask the one whose answer (who shows, which card) is hardest to predict. It also reads opponents' suggestions: a deal where an opponent holds a card they asked about counts for less (weight 0.3). That reading only steers the question; it never writes a mark.
-- **Envelope Smart:** same sampling with 120 deals, but scores each suggestion by the expected uncertainty left about the three envelope cards only. Not yet wired into the interactive page.
+- **Smart v1:** build 40 complete deals consistent with the notebook, try all 324 suggestions in each, and ask the one whose answer (who shows, which card) is hardest to predict. It also reads opponents' suggestions: a deal where an opponent holds a card they asked about counts for less (weight 0.3). That reading only steers the question; it never writes a mark.
+- **Smart:** same sampling and opponent reading with 120 deals, but each suggestion is scored by the expected uncertainty left about the three envelope cards only. It hunts for the answer instead of learning about every card, and it wins even from seat 3 (46.6% vs 3 Standard).
 
 Things that did not work:
 
@@ -71,7 +72,7 @@ node test/verify.js     # soundness checks
 - Planning more than one question ahead.
 - Unbiased sampling of consistent deals (the current sampler is a randomized backtracking search).
 - A smarter responder: when holding two matching cards, show the one from the category the asker already knows most about.
-- Simple rules a person can follow at the table, and how much of Envelope Smart's edge they keep.
+- Simple rules a person can follow at the table, and how much of Smart's edge they keep.
 
 ## License
 

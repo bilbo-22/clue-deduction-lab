@@ -432,7 +432,7 @@ function playTurn(game) {
   if (sol) {
     accuse(game, p, sol, ev);
   } else {
-    const mode = game.ask ? game.ask[p] : (K.level >= 4 ? 'reader' : 'basic');
+    const mode = game.ask ? game.ask[p] : (K.level >= 4 ? 'envgoal' : 'basic');
     const sug = mode === 'smart' ? chooseSmart(K, game.rng)
       : mode === 'stealth' ? chooseSmart(K, game.rng, 1)
       : mode === 'reader120' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120)
