@@ -298,7 +298,8 @@ Know.budget = 5e6;
 // in a solved category, use a card I hold (or the answer) so it reveals nothing about that category.
 // Smart questions: sample deals consistent with my notebook, then ask the suggestion whose
 // answer (who shows, and which card) is least predictable, i.e. carries the most information.
-function chooseSmart(K, rng, leak = 0, hints = null, nSamples = 40, envGoal = false) {
+// Board mode: forceRoom restricts the room slot; stats (out param) collects per-room best score, ties and the baseline.
+function chooseSmart(K, rng, leak = 0, hints = null, nSamples = 40, envGoal = false, forceRoom = -1, stats = null) {
   const samples = [];
   for (let i = 0; i < nSamples; i++) { const s = K.search(-1, -1, rng); if (s) samples.push(s); }
   // Reader: a deal where an opponent holds a card they asked about is less likely (people rarely ask about their own cards).
@@ -308,12 +309,23 @@ function chooseSmart(K, rng, leak = 0, hints = null, nSamples = 40, envGoal = fa
     return x;
   });
   const tot = wt.reduce((a, b) => a + b, 0);
-  if (samples.length < 2) return chooseSuggestion(K, rng);
+  if (samples.length < 2) { if (stats) stats.fallback = true; const f = chooseSuggestion(K, rng); if (forceRoom >= 0) f[2] = forceRoom; return f; }
+  if (stats) {
+    stats.rooms = new Map();
+    stats.base = 0;
+    if (envGoal) {
+      const m = new Map();
+      samples.forEach((own, j) => { const ek = own.reduce((a, l, c) => (l === ENV ? a * 32 + c : a), 0); m.set(ek, (m.get(ek) || 0) + wt[j]); });
+      for (const v of m.values()) { const f = v / tot; stats.base += f * Math.log2(f); }
+    }
+  }
   const pools = CAT_RANGE.map(([a, b]) => {
     const p = [];
     for (let c = a; c < b; c++) if (K.get(c, ENV) !== NO || K.get(c, K.me) === YES) p.push(c);
     return p;
   });
+  if (forceRoom >= 0) pools[2] = [forceRoom];
+  else if (stats) pools[2] = Array.from({ length: 9 }, (_, i) => CAT_RANGE[2][0] + i);
   let best = -Infinity, ties = [];
   for (const s of pools[0]) for (const w of pools[1]) for (const r of pools[2]) {
     const counts = new Map(), pub = new Map(), envBy = envGoal ? new Map() : null;
@@ -345,6 +357,11 @@ function chooseSmart(K, rng, leak = 0, hints = null, nSamples = 40, envGoal = fa
       }
     } else for (const n of counts.values()) { const f = n / tot; h -= f * Math.log2(f); }
     for (const n of pub.values()) { const f = n / tot; h += leak * f * Math.log2(f); }
+    if (stats) {
+      const e = stats.rooms.get(r);
+      if (!e || h > e.h + 1e-9) stats.rooms.set(r, { h, ties: [[s, w, r]] });
+      else if (h > e.h - 1e-9) e.ties.push([s, w, r]);
+    }
     if (h > best + 1e-9) { best = h; ties = [[s, w, r]]; } else if (h > best - 1e-9) ties.push([s, w, r]);
   }
   return ties[Math.floor(rng() * ties.length)];
@@ -441,6 +458,181 @@ function chooseSuggestion(K, rng) {
   });
 }
 
+// ===== Board mode (opts.board) =====
+// BOARD_DIST[a][b]: steps from room a to room b, door to door, on the classic 24 x 25 board
+// (leave the room = 1 step onto the doorway square, then walk, then 1 step into the room).
+// SOURCE / ACCURACY: no authoritative table was found online. These numbers were computed by
+// research/board_grid.js, a breadth-first search over an approximate reconstruction of the classic board
+// (rooms as rectangles, cellar blocked, no diagonals, no passing through rooms, other tokens never block,
+// doors always open). Door positions and room outlines come from memory of the board, so expect most
+// entries to be within about +-2 steps of the real board, and start squares +-3. Secret passages
+// (Kitchen<->Study, Lounge<->Conservatory) are handled separately and cost 0 steps.
+// Room order matches ROOMS: Kitchen, Ballroom, Conservatory, Dining Room, Billiard Room, Library, Lounge, Hall, Study.
+const BOARD_DIST = [[0,7,20,10,20,24,17,20,28],
+  [7,0,6,8,9,13,15,14,17],
+  [20,6,0,20,6,14,27,20,18],
+  [10,8,20,0,18,15,4,9,17],
+  [20,9,6,18,0,6,19,12,10],
+  [24,13,14,15,6,0,15,8,6],
+  [17,15,27,4,19,15,0,7,15],
+  [20,14,20,9,12,8,7,0,8],
+  [28,17,18,17,10,6,15,8,0]];
+// START_DIST[p][room]: steps from player p's start square (P1 Scarlet, P2 Mustard, P3 White, P4 Green) into each room.
+const START_DIST = [[21,19,31,10,23,19,8,7,19],
+  [21,19,31,8,23,19,8,13,21],
+  [18,8,12,20,16,20,27,24,24],
+  [23,17,29,12,21,17,10,5,17]];
+// Secret passages by room index: Kitchen(0)<->Study(8), Conservatory(2)<->Lounge(6).
+const PASSAGE = { 0: 8, 8: 0, 2: 6, 6: 2 };
+// Value of a room card that is not the strategy's favourite, relative to the favourite (=1).
+// Even a useless room still lets you ask about the suspect and weapon, so it is worth this much.
+const ROOM_FLOOR = 0.3;
+const ROOM_FIRST = CAT_RANGE[2][0];
+
+function boardOpts(b) { return { dice: (b && b.dice) === 2 ? 2 : 1, floor: b && b.floor != null ? b.floor : ROOM_FLOOR }; }
+function boardInit(opts) {
+  const b = boardOpts(opts.board);
+  // Players are suspects 0..3 and begin on their start squares (room -1, not yet walking anywhere).
+  b.pl = [0, 1, 2, 3].map(() => ({ room: -1, target: -1, left: 0, pushed: false }));
+  b.cache = null; b.et = {};
+  return b;
+}
+// Expected number of turns (including the turn you suggest in) to reach a room d steps away.
+function expTurns(b, d) {
+  const key = b.dice;
+  const memo = b.et[key] || (b.et[key] = []);
+  if (d <= 0) return 1;
+  if (memo[d] !== undefined) return memo[d];
+  const probs = key === 1 ? [[1, 1 / 6], [2, 1 / 6], [3, 1 / 6], [4, 1 / 6], [5, 1 / 6], [6, 1 / 6]]
+    : Array.from({ length: 11 }, (_, i) => [i + 2, (6 - Math.abs(i - 5)) / 36]);
+  let e = 1;
+  for (const [r, pr] of probs) if (d - r > 0) e += pr * expTurns(b, d - r);
+  return (memo[d] = e);
+}
+function roomDist(st, p, r) {
+  if (st.room < 0) return START_DIST[p][r];
+  if (st.room === r) return 0;
+  return PASSAGE[st.room] === r ? 0 : BOARD_DIST[st.room][r];
+}
+function smartParams(mode, hints) {
+  switch (mode) {
+    case 'smart': return [0, null, 40, false];
+    case 'stealth': return [1, null, 40, false];
+    case 'half': return [0.5, null, 40, false];
+    case 'envnoread': return [0, null, 120, true];
+    case 'envgoal400': return [0, hints, 400, true];
+    case 'reader120': return [0, hints, 120, false];
+    case 'envgoal': return [0, hints, 120, true];
+    case 'reader': return [0, hints, 40, false];
+    default: return null;
+  }
+}
+// How useful is naming this room, 0..1 (1 = the strategy's own favourite)? Standard and Most-X only.
+function roomRel(K, mode, rooms) {
+  const likely = mode.startsWith('likely');
+  const raw = rooms.map(c => {
+    if (K.get(c, ENV) === NO) return null;
+    if (!likely) { let u = 0; for (let l = 0; l < NL; l++) if (K.get(c, l) === UNK) u++; return u; }
+    let x = 0;
+    for (let l = 0; l < NP; l++) if (l !== K.me && K.get(c, l) === NO) x++;
+    for (const cl of K.clauses) if (!cl.done && cl.cards.includes(c)) x -= 0.01;
+    return Math.max(0, x);
+  });
+  const top = Math.max(...raw.map(v => (v === null ? -1 : v)));
+  return raw.map(v => (v === null ? 0 : likely ? (v + 1) / (top + 1) : (top > 0 ? v / top : 0)));
+}
+// Choose which room to head for. Rate = usefulness of the room's card / expected turns to get there.
+// Rooms whose card another player is known to hold are worth 0 (they just re-show it and hide the rest);
+// if the room category is solved, rooms nobody can show (mine / the envelope's) are worth 1, other rooms 0.5.
+function pickTarget(game, p, K, mode) {
+  const b = game.board, st = b.pl[p], t = game.turn;
+  const rooms = ROOMS.map((_, i) => ROOM_FIRST + i);
+  const cand = [];
+  for (let r = 0; r < 9; r++) if (st.room < 0 || r !== st.room || st.pushed) cand.push(r);
+  const solved = rooms.some(c => K.get(c, ENV) === YES);
+  let val;
+  const sp = smartParams(mode, hintsFor(game, p));
+  // Fallback value: a room card nobody else can show (mine, or the envelope's) is best, an unplaced one is
+  // fine, one known to be in another hand is useless (they would just show it again and hide the rest).
+  const heldByOther = c => { for (let l = 0; l < NP; l++) if (l !== K.me && K.get(c, l) === YES) return true; return false; };
+  const plain = rooms.map(c => (K.get(c, K.me) === YES || K.get(c, ENV) === YES ? 1 : heldByOther(c) ? 0 : 0.5));
+  if (solved) val = plain;
+  else if (sp) {
+    const stats = {};
+    chooseSmart(K, game.rng, sp[0], sp[1], sp[2], sp[3], -1, stats);
+    b.cache = { turn: t, stats };
+    val = stats.fallback ? plain : rooms.map((_, i) => { const e = stats.rooms.get(rooms[i]); return e ? e.h - stats.base : 0; });
+    if (Math.max(...val) < 1e-6) val = plain;
+  } else {
+    const rel = roomRel(K, mode, rooms);
+    val = rel.map((v, i) => (heldByOther(rooms[i]) ? 0 : b.floor + (1 - b.floor) * v));
+  }
+  let best = -Infinity, pick = -1;
+  for (const r of cand) {
+    const e = expTurns(b, roomDist(st, p, r));
+    const score = val[r] / e - 1e-6 * e;
+    if (score > best + 1e-12) { best = score; pick = r; }
+  }
+  return pick;
+}
+// Roll and move. Returns the room entered (index 0..8) or -1 if still in a corridor.
+function boardMove(game, p, K, mode, ev) {
+  const b = game.board, st = b.pl[p];
+  const bev = { from: st.room, pushed: st.pushed, rolls: [], target: -1, left: 0, passage: false, stay: false, end: -1 };
+  ev.board = bev;
+  if (st.target < 0) st.target = pickTarget(game, p, K, mode);
+  bev.target = st.target;
+  let enter = -1;
+  if (st.room >= 0 && st.target === st.room) { bev.stay = true; enter = st.room; }
+  else if (st.room >= 0 && PASSAGE[st.room] === st.target) { bev.passage = true; enter = st.target; }
+  else {
+    if (st.left <= 0) st.left = st.room < 0 ? START_DIST[p][st.target] : BOARD_DIST[st.room][st.target];
+    let sum = 0;
+    for (let i = 0; i < b.dice; i++) { const r = 1 + Math.floor(game.rng() * 6); bev.rolls.push(r); sum += r; }
+    st.left -= sum;
+    if (st.left <= 0) enter = st.target;
+    else st.room = -1;
+  }
+  bev.left = Math.max(0, st.left);
+  if (enter >= 0) { st.room = enter; st.target = -1; st.left = 0; }
+  st.pushed = false;
+  bev.end = enter;
+  return enter;
+}
+// After a suggestion in a room: a named suspect who is a player is moved into that room.
+function boardSuggested(game, p, sug, ev) {
+  const s = sug[0];
+  if (s < NP && s !== p) {
+    const st = game.board.pl[s];
+    st.room = ev.room; st.target = -1; st.left = 0; st.pushed = true;
+    ev.moved = s;
+  }
+}
+
+function askFor(game, K, p, mode, room) {
+  const hints = () => hintsFor(game, p);
+  const cs = (leak, h, n, env) => chooseSmart(K, game.rng, leak, h, n, env, room >= 0 ? ROOM_FIRST + room : -1);
+  const sug = mode === 'smart' ? cs(0, null, 40, false)
+    : mode === 'stealth' ? cs(1, null, 40, false)
+    : mode === 'likely' ? chooseLikely(K, game.rng)
+    : mode === 'likelydigits' ? chooseLikely(K, game.rng, 0, 'digits')
+    : mode === 'likelystrength' ? chooseLikely(K, game.rng, 0, 'strength')
+    : mode === 'likelyclue' ? chooseLikely(K, game.rng, 0.5)
+    : mode === 'envnoread' ? cs(0, null, 120, true)
+    : mode === 'envgoal400' ? cs(0, hints(), 400, true)
+    : mode === 'simple' ? chooseSimple(K, game.rng)
+    : mode === 'reader120' ? cs(0, hints(), 120, false)
+    : mode === 'envgoal' ? cs(0, hints(), 120, true)
+    : mode === 'reader' ? cs(0, hints(), 40, false)
+    : mode.startsWith('bluff') ? chooseBluff(K, game.rng, +mode.slice(5) / 100)
+    : mode === 'half' ? cs(0.5, null, 40, false)
+    : mode === 'focus' ? chooseFocus(K, game.rng)
+    : mode === 'cover' ? chooseFocus(K, game.rng, new Set([...game.shownTo[p].values()].flatMap(x => [...x])))
+    : chooseSuggestion(K, game.rng);
+  if (room >= 0) sug[2] = ROOM_FIRST + room;
+  return sug;
+}
+
 function newGame(seed, levels, opts = {}) {
   const rng = rngFrom(seed);
   const env = CAT_RANGE.map(([a, b]) => a + Math.floor(rng() * (b - a)));
@@ -451,7 +643,7 @@ function newGame(seed, levels, opts = {}) {
   const sizes = hands.map(h => h.length);
   const knows = hands.map((h, p) => { const K = new Know(p, sizes, levels[p]); K.initHand(h); return K; });
   if (opts.full) knows.forEach(K => K.deepen());
-  const game = { nowin: opts.nowin !== false, ask: opts.ask || null, seed, rng, env, hands, sizes, knows, levels, turn: 0, over: false, winner: -1, wrong: 0, events: [], shownTo: hands.map(() => new Map()), full: !!opts.full, snaps: [] };
+  const game = { nowin: opts.nowin !== false, ask: opts.ask || null, seed, rng, env, hands, sizes, knows, levels, turn: 0, over: false, winner: -1, wrong: 0, events: [], shownTo: hands.map(() => new Map()), full: !!opts.full, snaps: [], board: opts.board ? boardInit(opts) : null };
   if (opts.full) game.snaps.push(knows.map(K => K.snapshot()));
   return game;
 }
@@ -480,24 +672,17 @@ function playTurn(game) {
   } else {
     if (game.onDecide) game.onDecide(K, p, game);
     const mode = game.ask ? game.ask[p] : (K.level >= 4 ? 'envgoal' : 'basic');
-    const sug = mode === 'smart' ? chooseSmart(K, game.rng)
-      : mode === 'stealth' ? chooseSmart(K, game.rng, 1)
-      : mode === 'likely' ? chooseLikely(K, game.rng)
-      : mode === 'likelydigits' ? chooseLikely(K, game.rng, 0, 'digits')
-      : mode === 'likelystrength' ? chooseLikely(K, game.rng, 0, 'strength')
-      : mode === 'likelyclue' ? chooseLikely(K, game.rng, 0.5)
-      : mode === 'envnoread' ? chooseSmart(K, game.rng, 0, null, 120, true)
-      : mode === 'envgoal400' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 400, true)
-      : mode === 'simple' ? chooseSimple(K, game.rng)
-      : mode === 'reader120' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120)
-      : mode === 'envgoal' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120, true)
-      : mode === 'reader' ? chooseSmart(K, game.rng, 0, game.events.filter(e => e.suggestion && e.player !== p).map(e => ({ p: e.player, cards: e.suggestion })))
-      : mode.startsWith('bluff') ? chooseBluff(K, game.rng, +mode.slice(5) / 100)
-      : mode === 'half' ? chooseSmart(K, game.rng, 0.5)
-      : mode === 'focus' ? chooseFocus(K, game.rng)
-      : mode === 'cover' ? chooseFocus(K, game.rng, new Set([...game.shownTo[p].values()].flatMap(x => [...x])))
-      : chooseSuggestion(K, game.rng);
+    // Board mode: roll and move first; a suggestion is only possible when the move ends in a room.
+    const room = game.board ? boardMove(game, p, K, mode, ev) : -1;
+    if (game.board && room < 0) { /* still walking: no suggestion this turn */ } else {
+    let sug;
+    const cache = game.board && game.board.cache;
+    if (cache && cache.turn === t && cache.stats.rooms && cache.stats.rooms.has(ROOM_FIRST + room)) {
+      const ties = cache.stats.rooms.get(ROOM_FIRST + room).ties;
+      sug = ties[Math.floor(game.rng() * ties.length)].slice();
+    } else sug = askFor(game, K, p, mode, room);
     ev.suggestion = sug;
+    if (game.board) { ev.room = room; boardSuggested(game, p, sug, ev); }
     for (let i = 1; i < NP; i++) {
       const r = (p + i) % NP;
       const has = sug.filter(c => game.hands[r].includes(c));
@@ -524,6 +709,7 @@ function playTurn(game) {
       // Nobody could answer, yet the asker did not accuse. Had they held none of the three,
       // all three would be in the envelope and they would have won, so they hold at least one.
       game.knows.forEach(k => { if (k.me !== p) k.observeClause(p, sug, t, 'stayed silent after nobody answered'); });
+    }
     }
   }
   if (game.full) {
