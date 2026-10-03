@@ -1,8 +1,8 @@
-# Clue Deduction Lab
+# Solving the Game Clue
 
 How many turns does a four-player game of Clue take if everyone reasons perfectly? This project simulates 1,000 deals and shows every player's notebook turn by turn: ticks, crosses and numbered clues, with the reason behind each mark.
 
-**Interactive page:** https://bilbo-22.github.io/clue-deduction-lab/
+**Interactive page:** https://bilbo-22.github.io/solving-the-game-clue/
 
 ## Results
 
@@ -35,7 +35,13 @@ Every notebook below is Perfect; only the way of choosing a suggestion changes.
 - **Smart v1:** build 40 complete deals consistent with the notebook, try all 324 suggestions in each, and ask the one whose answer (who shows, which card) is hardest to predict. It also reads opponents' suggestions: a deal where an opponent holds a card they asked about counts for less (weight 0.3). That reading only steers the question; it never writes a mark.
 - **Smart:** same sampling and opponent reading with 120 deals, but each suggestion is scored by the expected uncertainty left about the three envelope cards only. It hunts for the answer instead of learning about every card, and it wins even from seat 3 (46.6% vs 3 Standard).
 
-**A rule a person can use:** in each unsolved category, name the possible card with the most X's in its row (the card the most players have already ruled out). A whole table playing this way solves the game in 12.9 turns, and one such player beats three Standard players 64.3% of the time. Smart still wins head to head. See [research/](research/) for how this was found from 2,125 logged Smart decisions.
+**A rule a person can use:**
+
+1. In each unsolved category, name the card that could still be the answer and has the most X's in its row (the card the most players have already ruled out).
+2. If cards tie on X's, take the one with the fewest clue numbers on it.
+3. In a solved category, name one of your own cards (or the solved card if you have none).
+
+A whole table playing this way solves the game in 12.5 turns, and one such player beats three Standard players about 64% of the time. Smart still wins head to head. See [research/](research/) for how this was found from 2,125 logged Smart decisions.
 
 Things that did not work:
 

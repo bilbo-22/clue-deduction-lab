@@ -39,7 +39,28 @@ Standard asks about the cards it knows least about. Smart asks about the cards m
 
 Head to head, Smart still wins: one Smart player vs three Most-X players wins 30.8%; one Most-X player vs three Smart players wins 21.9% (500 deals, fair share 25%).
 
-A tie-breaker (subtract half a point for each open clue the card appears in, since a card in someone's clue is more likely in their hand) gives 12.26 turns for a whole table and 27.7% for one player against three plain Most-X players (500 deals): a small edge.
+**Breaking ties with clue numbers helps a little.** When cards tie on X's, prefer the one with the fewest open clue numbers on it, since a card in someone's clue is more likely in their hand (1,000 deals):
+
+| Rule | Whole table | One player vs 3 Standard | One player vs 3 plain Most-X |
+|---|---|---|---|
+| Most X's | 12.93 turns | 64.3% | 25% |
+| Most X's, then fewest clue numbers | 12.45 turns | 63.7% | 26.5% |
+| Same, each clue number weighted by 1 / open cards in that clue | 12.42 turns | 63.9% | 26.5% |
+
+The weighted version adds nothing over simply counting clue numbers.
+
+## Why two X's matter so much
+
+`two_x_vs_empty.py` takes Smart's chosen question, keeps two of its cards fixed and swaps the third, to compare a card with two X's against an empty line in the same category:
+
+| Swap | 2-X card is the better question | Information about the envelope | Chance in envelope |
+|---|---|---|---|
+| Suspect: 2 X's vs empty line | 88% of 301 decisions | 1.27x | 65% vs 11% |
+| Weapon: 2 X's vs empty line | 89% of 323 | 1.28x | 66% vs 11% |
+| Room: 2 X's vs empty line | 92% of 234 | 1.41x | 65% vs 6% |
+| 1 X vs empty line | 39–61% | about 1.0x | about 31% vs 20% |
+
+A card with two X's can only be with one more player or in the envelope, so asking about it is close to a coin flip on the answer itself: either that player shows it, or nobody does and you have found it. An empty line is unlikely to be the answer and will probably just be shown. The gain starts at two X's; one X versus an empty line makes almost no difference. A 2-X card that only the last player in line could hold is a little weaker (1.21x), because an earlier answer can stop the question before it gets there.
 
 ## Where they disagree
 

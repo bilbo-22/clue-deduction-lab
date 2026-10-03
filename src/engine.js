@@ -392,7 +392,7 @@ function chooseSimple(K, rng) {
 
 // "Most likely" rule (research): in each unsolved category, name the live card with the most
 // X's in its row, i.e. the fewest players who could still hold it.
-function chooseLikely(K, rng, clueWeight = 0) {
+function chooseLikely(K, rng, clueWeight = 0, tie = null) {
   return CAT_RANGE.map(([a, b]) => {
     let solved = -1;
     for (let c = a; c < b; c++) if (K.get(c, ENV) === YES) solved = c;
@@ -408,6 +408,13 @@ function chooseLikely(K, rng, clueWeight = 0) {
       for (let l = 0; l < NP; l++) if (l !== K.me && K.get(c, l) === NO) x++;
       // A card named in someone's open clue is more likely in that player's hand.
       if (clueWeight) x -= clueWeight * K.clauses.filter(cl => !cl.done && cl.cards.includes(c)).length;
+      // Tie-breakers: fewer clue numbers on the card (tie = 'digits'), or weaker ones (tie = 'strength':
+      // each number counts 1 / how many cards in that clue are still open for that player).
+      if (tie) for (const cl of K.clauses) {
+        if (cl.done || !cl.cards.includes(c)) continue;
+        const open = cl.cards.filter(y => K.get(y, cl.p) !== NO).length;
+        x -= tie === 'digits' ? 0.01 : 0.01 / open;
+      }
       if (x > best) { best = x; pool = [c]; } else if (x === best) pool.push(c);
     }
     return pool[Math.floor(rng() * pool.length)];
@@ -476,7 +483,10 @@ function playTurn(game) {
     const sug = mode === 'smart' ? chooseSmart(K, game.rng)
       : mode === 'stealth' ? chooseSmart(K, game.rng, 1)
       : mode === 'likely' ? chooseLikely(K, game.rng)
+      : mode === 'likelydigits' ? chooseLikely(K, game.rng, 0, 'digits')
+      : mode === 'likelystrength' ? chooseLikely(K, game.rng, 0, 'strength')
       : mode === 'likelyclue' ? chooseLikely(K, game.rng, 0.5)
+      : mode === 'envnoread' ? chooseSmart(K, game.rng, 0, null, 120, true)
       : mode === 'envgoal400' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 400, true)
       : mode === 'simple' ? chooseSimple(K, game.rng)
       : mode === 'reader120' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120)
