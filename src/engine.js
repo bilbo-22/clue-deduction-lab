@@ -392,7 +392,7 @@ function chooseSimple(K, rng) {
 
 // "Most likely" rule (research): in each unsolved category, name the live card with the most
 // X's in its row, i.e. the fewest players who could still hold it.
-function chooseLikely(K, rng, clueWeight = 0, tie = null) {
+function chooseLikely(K, rng, clueWeight = 0, tie = null, asked = null, readWeight = 0, leak = null, leakWeight = 0) {
   return CAT_RANGE.map(([a, b]) => {
     let solved = -1;
     for (let c = a; c < b; c++) if (K.get(c, ENV) === YES) solved = c;
@@ -408,6 +408,10 @@ function chooseLikely(K, rng, clueWeight = 0, tie = null) {
       for (let l = 0; l < NP; l++) if (l !== K.me && K.get(c, l) === NO) x++;
       // A card named in someone's open clue is more likely in that player's hand.
       if (clueWeight) x -= clueWeight * K.clauses.filter(cl => !cl.done && cl.cards.includes(c)).length;
+      // Reading: an opponent who asked about a card probably does not hold it, so count it as part of an X.
+      if (readWeight && asked) for (const q of asked[c]) if (K.get(c, q) === UNK) x += readWeight;
+      // Hiding: if every opponent already knows I lack this card, a silent answer tells them it is the envelope card.
+      if (leakWeight && leak.has(c)) x -= leakWeight;
       // Tie-breakers: fewer clue numbers on the card (tie = 'digits'), or weaker ones (tie = 'strength':
       // each number counts 1 / how many cards in that clue are still open for that player).
       if (tie) for (const cl of K.clauses) {
@@ -419,6 +423,31 @@ function chooseLikely(K, rng, clueWeight = 0, tie = null) {
     }
     return pool[Math.floor(rng() * pool.length)];
   });
+}
+
+// Hiding player: Most-X with clue tie-break, minus `w` for each card all opponents already know I do not hold.
+function chooseHide(K, rng, game, me, w) {
+  const leak = new Set();
+  for (let c = 0; c < N; c++) if (game.knows.every(k => k.me === me || k.get(c, me) === NO)) leak.add(c);
+  return chooseLikely(K, rng, 0, 'digits', null, 0, leak, w);
+}
+
+// Game-theory player: Most-X with clue tie-break, reading opponents' questions with weight `read`,
+// and bluffing: with probability `bluff`, one unsolved category is filled with a card from my hand.
+function chooseGT(K, rng, game, me, bluff, read) {
+  const asked = Array.from({ length: N }, () => new Set());
+  for (const e of game.events) if (e.suggestion && e.player !== me) for (const c of e.suggestion) asked[c].add(e.player);
+  const sug = chooseLikely(K, rng, 0, 'digits', asked, read);
+  if (bluff && rng() < bluff) {
+    const opts = [0, 1, 2].filter(k => K.get(sug[k], ENV) !== YES && K.get(sug[k], me) !== YES)
+      .filter(k => { for (let c = CAT_RANGE[k][0]; c < CAT_RANGE[k][1]; c++) if (K.get(c, me) === YES) return true; return false; });
+    if (opts.length > 1) {
+      const k = opts[Math.floor(rng() * opts.length)], mine = [];
+      for (let c = CAT_RANGE[k][0]; c < CAT_RANGE[k][1]; c++) if (K.get(c, me) === YES) mine.push(c);
+      sug[k] = mine[Math.floor(rng() * mine.length)];
+    }
+  }
+  return sug;
 }
 
 function chooseSuggestion(K, rng) {
@@ -451,7 +480,7 @@ function newGame(seed, levels, opts = {}) {
   const sizes = hands.map(h => h.length);
   const knows = hands.map((h, p) => { const K = new Know(p, sizes, levels[p]); K.initHand(h); return K; });
   if (opts.full) knows.forEach(K => K.deepen());
-  const game = { nowin: opts.nowin !== false, ask: opts.ask || null, seed, rng, env, hands, sizes, knows, levels, turn: 0, over: false, winner: -1, wrong: 0, events: [], shownTo: hands.map(() => new Map()), full: !!opts.full, snaps: [] };
+  const game = { nowin: opts.nowin !== false, ask: opts.ask || null, show: opts.show || null, seed, rng, env, hands, sizes, knows, levels, turn: 0, over: false, winner: -1, wrong: 0, events: [], shownTo: hands.map(() => new Map()), full: !!opts.full, snaps: [] };
   if (opts.full) game.snaps.push(knows.map(K => K.snapshot()));
   return game;
 }
@@ -465,6 +494,35 @@ function accuse(game, p, sol, ev) {
 
 function hintsFor(game, p) {
   return game.events.filter(e => e.suggestion && e.player !== p).map(e => ({ p: e.player, cards: e.suggestion }));
+}
+
+// Which matching card a responder shows. 'asker' (default): repeat a card already shown to this asker.
+// 'random': no memory. 'known': prefer a card the asker's notebook already ticks for me, then the card
+// most other players already tick for me, then one shown to anybody before.
+function chooseShow(game, r, p, has, prior) {
+  const pol = game.show ? game.show[r] : 'asker';
+  const pick = a => a[Math.floor(game.rng() * a.length)];
+  if (pol === 'random') return pick(has);
+  if (pol === 'known') {
+    let best = -1, top = [];
+    for (const c of has) {
+      let sc = game.knows[p].get(c, r) === YES ? 100 : 0;
+      for (const k of game.knows) if (k.me !== r && k.me !== p && k.get(c, r) === YES) sc += 10;
+      for (const m of game.shownTo[r].values()) if (m.has(c)) { sc += 1; break; }
+      if (sc > best) { best = sc; top = [c]; } else if (sc === best) top.push(c);
+    }
+    return pick(top);
+  }
+  if (pol === 'wide' || pol === 'narrow') {
+    // wide: show the card whose category still has the most envelope candidates for the asker (least telling).
+    const K = game.knows[p];
+    const left = c => { const [a, b] = CAT_RANGE.find(([a, b]) => c >= a && c < b); let n = 0; for (let x = a; x < b; x++) if (K.get(x, ENV) !== NO) n++; return n; };
+    let best = pol === 'wide' ? -1 : 99, top = [];
+    for (const c of has) { const v = left(c); if (pol === 'wide' ? v > best : v < best) { best = v; top = [c]; } else if (v === best) top.push(c); }
+    return pick(top);
+  }
+  const reuse = has.filter(c => prior.has(c));
+  return reuse.length ? reuse[0] : pick(has);
 }
 
 function playTurn(game) {
@@ -483,6 +541,8 @@ function playTurn(game) {
     const sug = mode === 'smart' ? chooseSmart(K, game.rng)
       : mode === 'stealth' ? chooseSmart(K, game.rng, 1)
       : mode === 'likely' ? chooseLikely(K, game.rng)
+      : mode.startsWith('hide:') ? chooseHide(K, game.rng, game, p, +mode.split(':')[1])
+      : mode.startsWith('gt:') ? chooseGT(K, game.rng, game, p, +mode.split(':')[1], +mode.split(':')[2])
       : mode === 'likelydigits' ? chooseLikely(K, game.rng, 0, 'digits')
       : mode === 'likelystrength' ? chooseLikely(K, game.rng, 0, 'strength')
       : mode === 'likelyclue' ? chooseLikely(K, game.rng, 0.5)
@@ -507,8 +567,7 @@ function playTurn(game) {
         continue;
       }
       const prior = game.shownTo[r].get(p) || new Set();
-      const reuse = has.filter(c => prior.has(c));
-      const card = reuse.length ? reuse[0] : has[Math.floor(game.rng() * has.length)];
+      const card = chooseShow(game, r, p, has, prior);
       prior.add(card); game.shownTo[r].set(p, prior);
       ev.responder = r; ev.shown = card;
       game.knows.forEach(k => {

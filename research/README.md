@@ -81,3 +81,19 @@ A Most-X player almost always names cards they do not hold, so their questions l
 | 3 Smart players who ignore questions | 40.1% |
 
 Reading questions is worth about 17 points here, and without it Smart loses to the simple rule. Part of that gap is reading every opponent's questions, not just the Most-X player's, so it measures the value of reading in general rather than the leak alone.
+
+## Game theory: bluffing, reading and hiding
+
+`gt_run.js` and `gt_matrix.sh` play one focal player against three opponents, rotating seats (400–1,000 deals per cell, fair share 25%). Players use Most-X with the clue tie-break. `gt:b:r` bluffs with probability `b` (fills one unsolved category with an own card) and reads questions: a card an opponent asked about counts as `r` of an X.
+
+```bash
+bash research/gt_matrix.sh likelydigits 400 gt:0:0 gt:0:0.5 gt:0.2:0   # opponents, deals, focal modes
+```
+
+**Bluffing never paid.** 21.8–24.7% against every population tested. It costs more information than it hides.
+
+**Crude reading is a minority strategy.** Against non-readers a reader gains about 2 points. Against three readers, the one non-reader wins about 30%. Readers herd: 2.3–2.6 of the 3 cards in their questions were already asked about by someone, vs 1.3–1.6 for non-readers, so they spend turns on the same cards. Smart's exact reading (weighting deals) is still worth about 17 points; it is the rough "half an X" version that herds.
+
+**Which card to show does not matter.** `show_run.js` gives one responder a policy: `random`, `asker` (repeat a card already shown to that asker, the default), `known` (prefer cards others already know I hold), `wide` / `narrow` (by how many envelope candidates the category still has for the asker). All land at 24.2–25.7%. Good askers never name a card they already know you hold, so the choice rarely comes up.
+
+**Hiding from public deductions does not pay.** If everyone knows I lack a card and I ask about it and nobody answers, everyone learns it is the envelope card. `hide:w` subtracts `w` from such cards: 24.4–25.1% for small `w`, 17.8% for `w = 2`. `leak_count.js` shows why: in 300 games, 41% of questions contained such a card and 141 got no answer, and in all 141 the asker won that same turn. Silence completes the asker's solution, so they accuse before anyone else can use it.
