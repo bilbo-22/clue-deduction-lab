@@ -47,3 +47,5 @@ The Most-X choice includes Smart's question in 47% of decisions and captures abo
 
 - **Smart was wrong.** In 4 of the 5 biggest gaps, Most-X's question was as good as or better than Smart's once measured with more deals (for example deal 170, turn 18: about 4.4 envelope answers left vs Smart's 5.3). With 120 samples, Smart sometimes picks a question that only looked best by chance.
 - **Smart was right because of clues.** Deal 173, turn 15: every candidate had at most one X, so X-counting could not separate them. Smart named the Wrench, which had no X's but a 60% chance of being in the envelope once the open clues are taken into account. About 12.4 answers left vs 14.6 for the Most-X pick.
+
+**More imagined deals did not help in actual games.** One Smart player using 400 deals per decision against three Smart players using 120 won 24.8% (300 deals, fair share 25%). The occasional mis-pick from sampling noise costs too little to change who wins.
