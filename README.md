@@ -35,6 +35,8 @@ Every notebook below is Perfect; only the way of choosing a suggestion changes.
 - **Smart v1:** build 40 complete deals consistent with the notebook, try all 324 suggestions in each, and ask the one whose answer (who shows, which card) is hardest to predict. It also reads opponents' suggestions: a deal where an opponent holds a card they asked about counts for less (weight 0.3). That reading only steers the question; it never writes a mark.
 - **Smart:** same sampling and opponent reading with 120 deals, but each suggestion is scored by the expected uncertainty left about the three envelope cards only. It hunts for the answer instead of learning about every card, and it wins even from seat 3 (46.6% vs 3 Standard).
 
+**A rule a person can use:** in each unsolved category, name the possible card with the most X's in its row (the card the most players have already ruled out). A whole table playing this way solves the game in 12.9 turns, and one such player beats three Standard players 64.3% of the time. Smart still wins head to head. See [research/](research/) for how this was found from 2,125 logged Smart decisions.
+
 Things that did not work:
 
 - **Padding with your own cards** (one unknown plus two of your cards) loses about 13 points of win rate. It makes "nobody can answer" 3.6 times more likely, and that answer is public: the next player to move uses it first.
@@ -72,7 +74,6 @@ node test/verify.js     # soundness checks
 - Planning more than one question ahead.
 - Unbiased sampling of consistent deals (the current sampler is a randomized backtracking search).
 - A smarter responder: when holding two matching cards, show the one from the category the asker already knows most about.
-- Simple rules a person can follow at the table, and how much of Smart's edge they keep.
 
 ## License
 

@@ -375,6 +375,45 @@ function chooseBluff(K, rng, rate) {
   return sug;
 }
 
+// Simple readable rule (research): most cards that could still be the answer, avoid cards
+// someone is known to hold, then prefer cards with the most open cells.
+function chooseSimple(K, rng) {
+  const score = c => {
+    let live = K.get(c, ENV) !== NO && K.get(c, K.me) !== YES && K.get(c, ENV) !== YES ? 1 : 0, held = 0, open = 0;
+    for (let l = 0; l < NL; l++) { if (l !== K.me && l !== ENV && K.get(c, l) === YES) held = 1; if (K.get(c, l) === UNK) open++; }
+    return live * 10 - held * 20 + open;
+  };
+  return CAT_RANGE.map(([a, b]) => {
+    let best = -Infinity, pool = [];
+    for (let c = a; c < b; c++) { const v = score(c); if (v > best) { best = v; pool = [c]; } else if (v === best) pool.push(c); }
+    return pool[Math.floor(rng() * pool.length)];
+  });
+}
+
+// "Most likely" rule (research): in each unsolved category, name the live card with the most
+// X's in its row, i.e. the fewest players who could still hold it.
+function chooseLikely(K, rng, clueWeight = 0) {
+  return CAT_RANGE.map(([a, b]) => {
+    let solved = -1;
+    for (let c = a; c < b; c++) if (K.get(c, ENV) === YES) solved = c;
+    if (solved >= 0) {
+      const mine = [];
+      for (let c = a; c < b; c++) if (K.get(c, K.me) === YES) mine.push(c);
+      return mine.length ? mine[Math.floor(rng() * mine.length)] : solved;
+    }
+    let best = -Infinity, pool = [];
+    for (let c = a; c < b; c++) {
+      if (K.get(c, ENV) === NO) continue;
+      let x = 0;
+      for (let l = 0; l < NP; l++) if (l !== K.me && K.get(c, l) === NO) x++;
+      // A card named in someone's open clue is more likely in that player's hand.
+      if (clueWeight) x -= clueWeight * K.clauses.filter(cl => !cl.done && cl.cards.includes(c)).length;
+      if (x > best) { best = x; pool = [c]; } else if (x === best) pool.push(c);
+    }
+    return pool[Math.floor(rng() * pool.length)];
+  });
+}
+
 function chooseSuggestion(K, rng) {
   return CAT_RANGE.map(([a, b]) => {
     let solved = -1;
@@ -432,9 +471,14 @@ function playTurn(game) {
   if (sol) {
     accuse(game, p, sol, ev);
   } else {
+    if (game.onDecide) game.onDecide(K, p, game);
     const mode = game.ask ? game.ask[p] : (K.level >= 4 ? 'envgoal' : 'basic');
     const sug = mode === 'smart' ? chooseSmart(K, game.rng)
       : mode === 'stealth' ? chooseSmart(K, game.rng, 1)
+      : mode === 'likely' ? chooseLikely(K, game.rng)
+      : mode === 'likelyclue' ? chooseLikely(K, game.rng, 0.5)
+      : mode === 'envgoal400' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 400, true)
+      : mode === 'simple' ? chooseSimple(K, game.rng)
       : mode === 'reader120' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120)
       : mode === 'envgoal' ? chooseSmart(K, game.rng, 0, hintsFor(game, p), 120, true)
       : mode === 'reader' ? chooseSmart(K, game.rng, 0, game.events.filter(e => e.suggestion && e.player !== p).map(e => ({ p: e.player, cards: e.suggestion })))
@@ -488,4 +532,4 @@ function runGame(seed, levels, opts) {
   return g;
 }
 
-if (typeof module !== 'undefined') module.exports = { runGame, newGame, playTurn, CARDS, LEVELS };
+if (typeof module !== 'undefined') module.exports = { runGame, newGame, playTurn, CARDS, LEVELS, chooseSuggestion, hintsFor, CAT_RANGE, ENV, NP, NL };
