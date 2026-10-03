@@ -4,6 +4,8 @@ How many turns does a four-player game of Clue take if everyone reasons perfectl
 
 **Interactive page:** https://bilbo-22.github.io/solving-the-game-clue/
 
+**Just want to win?** Read [STRATEGY.md](STRATEGY.md), the best strategy we found, step by step.
+
 ## Results
 
 With four perfect logicians, a game is solved on **turn 21.5 on average** (a turn is one player's go, so about round 6).
@@ -60,7 +62,7 @@ Each level keeps the rules of the levels before it and repeats them until nothin
 ## Assumptions
 
 - 21 cards: 6 suspects, 6 weapons, 9 rooms. Seats 1–2 get 5 cards, seats 3–4 get 4.
-- **No board.** Every player can suggest any room every turn, so these are pure-deduction turn counts. Real games with dice and movement run longer.
+- **No board** in the main results: every player can suggest any room every turn, so these are pure-deduction turn counts. An optional board mode (`opts.board`, 2 dice by default, secret passages, suggestions only in the room you stand in) is in `src/engine.js`; with it, games take 27.4 turns (Standard) and 18.3 (most-X rule). See [STRATEGY.md](STRATEGY.md#the-evidence). Board distances are reconstructed by hand and may be off by about 2 steps.
 - Responders answer clockwise. A responder holding several cards re-shows one the asker has already seen when possible.
 - Standard suggestions: in each unsolved category, name the envelope candidate the notebook knows least about. In a solved category, name a card from your own hand so the answer must come from the other two.
 - Players accuse only when certain, at the start of their turn or right after their own suggestion.
