@@ -49,6 +49,8 @@ Head to head, Smart still wins: one Smart player vs three Most-X players wins 30
 
 The weighted version adds nothing over simply counting clue numbers.
 
+**The order matters: X's first, clue numbers second.** Reversing it (fewest clue numbers first, most X's only as the tie-break, mode `digitsfirst`) is clearly worse: 14.59 turns for the whole table instead of 12.45, 50.6% instead of 63.8% against 3 Standard, and 20.2% against 3 Most-X players (1,000 deals). Cards with no clue numbers are mostly empty rows, which are usually in someone's hand.
+
 ## Why two X's matter so much
 
 `two_x_vs_empty.py` takes Smart's chosen question, keeps two of its cards fixed and swaps the third, to compare a card with two X's against an empty line in the same category:

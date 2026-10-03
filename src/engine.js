@@ -434,7 +434,7 @@ function chooseLikely(K, rng, clueWeight = 0, tie = null, asked = null, readWeig
       if (tie) for (const cl of K.clauses) {
         if (cl.done || !cl.cards.includes(c)) continue;
         const open = cl.cards.filter(y => K.get(y, cl.p) !== NO).length;
-        x -= tie === 'digits' ? 0.01 : 0.01 / open;
+        x -= tie === 'digits' ? 0.01 : tie === 'digitsfirst' ? 10 : 0.01 / open;
       }
       if (x > best) { best = x; pool = [c]; } else if (x === best) pool.push(c);
     }
@@ -647,6 +647,7 @@ function askFor(game, K, p, mode, room) {
     : mode.startsWith('hide:') ? chooseHide(K, game.rng, game, p, +mode.split(':')[1])
     : mode.startsWith('gt:') ? chooseGT(K, game.rng, game, p, +mode.split(':')[1], +mode.split(':')[2])
     : mode === 'likelydigits' ? chooseLikely(K, game.rng, 0, 'digits')
+    : mode === 'digitsfirst' ? chooseLikely(K, game.rng, 0, 'digitsfirst')
     : mode === 'likelystrength' ? chooseLikely(K, game.rng, 0, 'strength')
     : mode === 'likelyclue' ? chooseLikely(K, game.rng, 0.5)
     : mode === 'envnoread' ? cs(0, null, 120, true)
