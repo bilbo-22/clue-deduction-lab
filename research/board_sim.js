@@ -2,7 +2,7 @@
 // configs: std, mostx, smart (whole table); mostx1, smart1 (one such player vs 3 Standard, every seat)
 // Prints one JSON line {turns:[], wins:[...], wrong, n}; use research/board_run.sh to shard across processes.
 const { runGame } = require('../src/engine.js');
-const [cfg, deals, dice = '1', start = '1', step = '1', floor]  = process.argv.slice(2);
+const [cfg, deals, dice = '2', start = '1', step = '1', floor]  = process.argv.slice(2);
 const opts = ask => ({ board: { dice: +dice, floor: floor === undefined ? undefined : +floor }, ask });
 const out = { turns: [], wins: [], wrong: 0, n: 0, noWin: 0 };
 function one(seed, levels, ask) {

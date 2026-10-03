@@ -489,7 +489,7 @@ const PASSAGE = { 0: 8, 8: 0, 2: 6, 6: 2 };
 const ROOM_FLOOR = 0.3;
 const ROOM_FIRST = CAT_RANGE[2][0];
 
-function boardOpts(b) { return { dice: (b && b.dice) === 2 ? 2 : 1, floor: b && b.floor != null ? b.floor : ROOM_FLOOR }; }
+function boardOpts(b) { return { dice: (b && b.dice) === 1 ? 1 : 2, floor: b && b.floor != null ? b.floor : ROOM_FLOOR }; }
 function boardInit(opts) {
   const b = boardOpts(opts.board);
   // Players are suspects 0..3 and begin on their start squares (room -1, not yet walking anywhere).
